@@ -256,12 +256,19 @@ something wrong. Two layers of protection are built in:
   mid-sentence), that fine-grained formatting collapses onto the first run's
   style. Whole-document structure is unaffected.
 - **TXT**: translated line by line, preserving blank lines.
-- **PDF**: best-effort only. PDFs have no flow-document structure -- text is
-  absolute-positioned glyphs. This tool extracts text blocks, translates them,
-  and redraws them into the same bounding box (auto-shrinking the font to
-  fit), but since translated text is rarely the same length as the original,
-  line wrapping can shift. Scanned (image-only) PDFs are not supported yet --
-  see Roadmap.
+- **PDF**: tables are detected first (via PyMuPDF's table finder) and
+  translated cell-by-cell, matched back to their row/column position -- the
+  table's border lines are preserved by redacting only the inside of each
+  cell (inset a couple points from the border), not the cell's edge itself,
+  so the grid survives untouched. Any text that isn't part of a detected
+  table is translated as loose paragraph blocks the same way as before, and
+  the two passes don't overlap (table text is never also translated as a
+  loose block). Beyond that, PDF is still best-effort: it has no flow-document
+  structure -- text is absolute-positioned glyphs, redrawn into the same
+  bounding box with auto-shrinking font size, but since translated text is
+  rarely the same length as the original, line wrapping within a single cell
+  or paragraph can still shift. Scanned (image-only) PDFs are not supported
+  yet -- see Roadmap.
 
 ---
 

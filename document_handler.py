@@ -201,6 +201,15 @@ def _insert_shrink_to_fit(
     page.insert_textbox(padded, text, fontsize=min_size, **kwargs)
 
 
+def _rect_in_any(rect, table_bboxes) -> bool:
+    """True if rect's center falls inside any of the given table bounding boxes."""
+    cx, cy = (rect.x0 + rect.x1) / 2, (rect.y0 + rect.y1) / 2
+    for bbox in table_bboxes:
+        if bbox.x0 <= cx <= bbox.x1 and bbox.y0 <= cy <= bbox.y1:
+            return True
+    return False
+
+
 def translate_pdf(
     input_path: str,
     output_path: str,
@@ -218,24 +227,66 @@ def translate_pdf(
 
     doc = fitz.open(input_path)
 
-    all_blocks = []  # (page_index, rect, text)
+    # (page_index, rect, text, is_table_cell) -- is_table_cell controls how
+    # each item gets redacted below: table cells use an inset rect so the
+    # table's border lines survive redaction, loose paragraph text doesn't
+    # need that (there are no lines to protect).
+    all_items = []
+
     for page_index, page in enumerate(doc):
-        blocks = page.get_text("blocks")
-        for b in blocks:
+        table_bboxes = []
+        try:
+            tables = page.find_tables()
+        except Exception:
+            tables = None  # older PyMuPDF without table support -- degrade gracefully
+
+        if tables is not None:
+            for table in tables.tables:
+                table_bboxes.append(fitz.Rect(table.bbox))
+                grid = table.extract()  # row-major list of lists of cell text
+                for row, row_cells in zip(grid, table.rows):
+                    for cell_text, cell_bbox in zip(row, row_cells.cells):
+                        cell_text = (cell_text or "").strip()
+                        if cell_text and cell_bbox is not None:
+                            all_items.append((page_index, fitz.Rect(cell_bbox), cell_text, True))
+
+        # Loose (non-table) text blocks -- skip anything that falls inside a
+        # detected table's bounding box, since that text was already picked
+        # up cell-by-cell above and would otherwise be translated twice.
+        for b in page.get_text("blocks"):
             x0, y0, x1, y1, text = b[0], b[1], b[2], b[3], b[4]
             text = text.strip()
-            if text:
-                all_blocks.append((page_index, fitz.Rect(x0, y0, x1, y1), text))
+            if not text:
+                continue
+            rect = fitz.Rect(x0, y0, x1, y1)
+            if _rect_in_any(rect, table_bboxes):
+                continue
+            all_items.append((page_index, rect, text, False))
 
+    num_tables = sum(1 for _, _, _, is_cell in all_items if is_cell)
     if progress_cb:
-        progress_cb(f"{Path(input_path).name}: found {len(all_blocks)} text blocks")
+        progress_cb(
+            f"{Path(input_path).name}: found {len(all_items)} text segments "
+            f"({num_tables} table cells, {len(all_items) - num_tables} other)"
+        )
 
-    texts = [b[2] for b in all_blocks]
+    texts = [item[2] for item in all_items]
     translated = translator_fn(texts, src_lang, tgt_lang)
 
-    # Redact original text first (must apply per page before inserting new text).
-    for page_index, rect, _ in all_blocks:
-        doc[page_index].add_redact_annot(rect)
+    # Redact original text first (must apply per page before inserting new
+    # text). Table cells are redacted with an inset rect so the redaction
+    # only clears the text inside the cell, leaving the cell's border lines
+    # (drawn exactly on the cell's bounding box) intact.
+    for page_index, rect, _text, is_table_cell in all_items:
+        page = doc[page_index]
+        if is_table_cell:
+            inset = fitz.Rect(rect.x0 + 2, rect.y0 + 2, rect.x1 - 2, rect.y1 - 2)
+            if inset.is_valid and not inset.is_empty:
+                page.add_redact_annot(inset)
+            else:
+                page.add_redact_annot(rect)
+        else:
+            page.add_redact_annot(rect)
     for page in doc:
         page.apply_redactions()
 
@@ -243,7 +294,7 @@ def translate_pdf(
     if progress_cb and fontfile:
         progress_cb(f"Using embedded Devanagari font for {tgt_lang} output.")
 
-    for (page_index, rect, _original), new_text in zip(all_blocks, translated):
+    for (page_index, rect, _original, _is_table_cell), new_text in zip(all_items, translated):
         page = doc[page_index]
         _insert_shrink_to_fit(page, rect, new_text, fontname=fontname, fontfile=fontfile)
 
