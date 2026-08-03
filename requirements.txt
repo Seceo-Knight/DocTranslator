@@ -1,0 +1,13 @@
+torch
+transformers<5.0.0
+sentencepiece
+indic-nlp-library
+sacremoses
+regex
+tqdm
+python-docx
+PyMuPDF
+langdetect
+accelerate
+huggingface_hub
+pyinstaller

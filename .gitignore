@@ -1,0 +1,24 @@
+# Virtual environment
+venv/
+env/
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# PyInstaller build output
+build/
+dist/
+*.spec
+
+# Translation output / test files
+translated_docs/
+
+# Hugging Face cache (if it ever ends up inside the project folder)
+.cache/
+
+# OS cruft
+.DS_Store
+Thumbs.db
