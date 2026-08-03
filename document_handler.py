@@ -34,8 +34,21 @@ PDF has no flow-document structure to preserve -- it's absolute-positioned
 glyphs. We extract text blocks with PyMuPDF, translate each block, redact the
 original glyphs, and draw the translation back into the same bounding box with
 auto-shrunk font size. This is best-effort: translated text is often longer or
-shorter than the original, so line breaks can shift. Scanned (image-only) PDFs
-are not handled -- that needs OCR, listed as a future improvement.
+shorter than the original, so line breaks can shift.
+
+Tables are detected first (via PyMuPDF's table finder) and translated
+cell-by-cell so row/column structure is preserved; any text outside a
+detected table is translated as loose blocks, without double-processing
+table text twice.
+
+Scanned (image-only) PDFs -- pages with no extractable text layer at all --
+are detected automatically and routed through OCR (see ocr_engine.py) instead:
+the page is rendered to an image, OCR finds the text regions, those regions
+are translated the same way as any other block, and the original pixels
+under each region are blanked out (via redaction's image-blanking mode)
+before the translation is drawn on top. This is optional -- pass an
+`ocr_engine=None` (the default) to skip OCR entirely and leave scanned pages
+untouched.
 """
 
 from __future__ import annotations
@@ -123,6 +136,7 @@ def translate_docx(
     src_lang: str,
     tgt_lang: str,
     progress_cb=None,
+    ocr_engine=None,  # unused for DOCX -- accepted so translate_file can pass it uniformly to any handler
 ) -> None:
     from docx import Document  # local import: keeps module importable without python-docx installed
 
@@ -153,6 +167,7 @@ def translate_txt(
     src_lang: str,
     tgt_lang: str,
     progress_cb=None,
+    ocr_engine=None,  # unused for TXT -- accepted so translate_file can pass it uniformly to any handler
 ) -> None:
     text = Path(input_path).read_text(encoding="utf-8")
     lines = text.split("\n")
@@ -217,6 +232,7 @@ def translate_pdf(
     src_lang: str,
     tgt_lang: str,
     progress_cb=None,
+    ocr_engine=None,
 ) -> None:
     try:
         import fitz  # PyMuPDF
@@ -230,7 +246,9 @@ def translate_pdf(
     # (page_index, rect, text, is_table_cell) -- is_table_cell controls how
     # each item gets redacted below: table cells use an inset rect so the
     # table's border lines survive redaction, loose paragraph text doesn't
-    # need that (there are no lines to protect).
+    # need that (there are no lines to protect). OCR-detected regions are
+    # treated the same as loose text (is_table_cell=False) -- there's no
+    # border structure to protect on a scanned page.
     all_items = []
 
     for page_index, page in enumerate(doc):
@@ -253,15 +271,28 @@ def translate_pdf(
         # Loose (non-table) text blocks -- skip anything that falls inside a
         # detected table's bounding box, since that text was already picked
         # up cell-by-cell above and would otherwise be translated twice.
+        page_had_text = False
         for b in page.get_text("blocks"):
             x0, y0, x1, y1, text = b[0], b[1], b[2], b[3], b[4]
             text = text.strip()
             if not text:
                 continue
+            page_had_text = True
             rect = fitz.Rect(x0, y0, x1, y1)
             if _rect_in_any(rect, table_bboxes):
                 continue
             all_items.append((page_index, rect, text, False))
+
+        # Scanned/image-only page: no text layer to extract at all (blocks
+        # and tables both came back empty), so fall back to OCR if an OCR
+        # engine was provided. Skipped entirely if ocr_engine is None -- the
+        # page is then left completely untouched, same as before this
+        # feature existed.
+        if not page_had_text and ocr_engine is not None and ocr_engine.is_scanned_page(page):
+            if progress_cb:
+                progress_cb(f"  Page {page_index + 1} appears to be scanned -- running OCR...")
+            for rect, text in ocr_engine.detect_regions(page, src_lang):
+                all_items.append((page_index, rect, text, False))
 
     num_tables = sum(1 for _, _, _, is_cell in all_items if is_cell)
     if progress_cb:
@@ -317,12 +348,16 @@ def translate_file(
     src_lang: str,
     tgt_lang: str,
     progress_cb=None,
+    ocr_engine=None,
 ) -> None:
     ext = Path(input_path).suffix.lower()
     handler = SUPPORTED_EXTENSIONS.get(ext)
     if handler is None:
         raise ValueError(f"Unsupported file type: {ext}")
-    handler(input_path, output_path, translator_fn, src_lang, tgt_lang, progress_cb=progress_cb)
+    handler(
+        input_path, output_path, translator_fn, src_lang, tgt_lang,
+        progress_cb=progress_cb, ocr_engine=ocr_engine,
+    )
 
 
 def extract_sample_texts(input_path: str, max_samples: int = 20) -> List[str]:

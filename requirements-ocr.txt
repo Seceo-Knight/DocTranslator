@@ -1,0 +1,13 @@
+# Optional: only needed if you want OCR support for scanned/image-only PDFs
+# (the "OCR scanned PDFs" checkbox in the GUI, or --ocr on the CLI).
+#
+# Install torchvision from the CPU-only index FIRST, the same way torch
+# itself was installed in requirements.txt -- otherwise a plain
+# `pip install torchvision` pulls the full CUDA/GPU build (several GB) even
+# without a GPU, the exact same issue documented for torch in the main
+# README:
+#
+#     pip install torchvision --index-url https://download.pytorch.org/whl/cpu
+#     pip install -r requirements-ocr.txt
+#
+easyocr

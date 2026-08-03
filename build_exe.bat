@@ -13,6 +13,15 @@ REM first run, then works fully offline afterwards. Run
 REM     huggingface-cli login
 REM once beforehand with a token that has accepted the IndicTrans2 model
 REM licenses, or the first-run download will fail with a 401 error.
+REM
+REM OCR (easyocr) is NOT bundled by this script, since it's an optional
+REM feature most users won't need (see requirements-ocr.txt / the README's
+REM OCR section). If you installed requirements-ocr.txt and want OCR to work
+REM in the packaged exe too, add these three lines to the pyinstaller
+REM command below:
+REM     --collect-all easyocr ^
+REM     --collect-all torchvision ^
+REM     --collect-all cv2 ^
 REM ---------------------------------------------------------------------
 
 call venv\Scripts\activate

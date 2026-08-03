@@ -27,11 +27,13 @@ DocumentTranslator/
 ├── indic_processor.py      # Pure-Python pre/post-processing (see note below)
 ├── document_handler.py     # DOCX/TXT/PDF structure-preserving read-write
 ├── lang_detect.py          # English/Hindi/Marathi auto-detection
+├── ocr_engine.py           # Optional OCR for scanned/image-only PDFs (see below)
 ├── fonts/                  # Bundled Devanagari font for PDF output (see below)
 │   ├── Shobhika-Regular.otf
 │   └── Shobhika-Bold.otf
 ├── glossary.txt            # Your do-not-translate list (chemical/product names)
 ├── requirements.txt
+├── requirements-ocr.txt    # Optional extra dependency for OCR support
 ├── build_exe.bat           # PyInstaller packaging script (run on Windows)
 └── translated_docs/        # default output folder
 ```
@@ -267,8 +269,57 @@ something wrong. Two layers of protection are built in:
   structure -- text is absolute-positioned glyphs, redrawn into the same
   bounding box with auto-shrinking font size, but since translated text is
   rarely the same length as the original, line wrapping within a single cell
-  or paragraph can still shift. Scanned (image-only) PDFs are not supported
-  yet -- see Roadmap.
+  or paragraph can still shift.
+- **Scanned/image-only PDFs** (a page with no extractable text at all -- a
+  photographed or scanned document with no OCR ever run on it): detected
+  automatically, and -- if OCR is enabled, see below -- routed through OCR
+  instead of the normal text extraction. The page is rendered to an image,
+  OCR finds each line of text and its position, those lines are translated
+  the same way as any other block, and the original pixels under each
+  detected region are blanked out (via PDF redaction's image-blanking mode)
+  before the translated text is drawn on top, so the rest of the scanned
+  image (photos, signatures, letterhead, table lines that are part of the
+  image rather than real PDF structure) is left completely alone.
+
+## OCR for scanned PDFs (optional)
+
+OCR is off by default -- it's not installed unless you ask for it, and even
+once installed, it only runs on pages that are genuinely scanned/image-only
+(a normal digital PDF page is untouched either way).
+
+**Setup (one extra step beyond the main install):**
+
+```
+pip install torchvision --index-url https://download.pytorch.org/whl/cpu
+pip install -r requirements-ocr.txt
+```
+
+The `torchvision` install has to go through the CPU-only index explicitly,
+for the exact same reason `torch` itself does in the main setup steps above --
+otherwise it silently pulls the full CUDA/GPU build.
+
+**Using it:**
+
+- GUI: check "OCR scanned PDFs" before clicking Start.
+- CLI: add `--ocr`, e.g. `python app.py --cli scan.pdf --from English --to Hindi --ocr`
+
+The underlying engine is [EasyOCR](https://github.com/JaidedAI/EasyOCR)
+(PyTorch-based), chosen specifically because it's a plain `pip install` --
+Tesseract, the more common alternative, requires installing a separate
+non-Python executable on Windows, which is exactly the kind of friction this
+project avoided elsewhere (see the IndicTransToolkit note earlier in this
+README). EasyOCR natively supports Hindi and Marathi (Devanagari) alongside
+English. Like the translation models, its OCR models download once per
+language on first use (tens of MB, much smaller than the translation
+models) and then work fully offline.
+
+Known limitations specific to OCR mode: table borders that are literally
+part of a scanned image (ink/print lines, not real PDF vector graphics)
+aren't specially detected the way digital-PDF tables are -- each OCR'd line
+of text is treated as a loose block. OCR accuracy depends on scan quality;
+skewed/rotated scans aren't corrected. If `easyocr` isn't installed and OCR
+is requested anyway, you'll get a clear error telling you to
+`pip install easyocr` rather than an obscure crash.
 
 ---
 
@@ -333,7 +384,7 @@ whichever machine will run the exe before its first launch, or set an
 - [x] PDF table structure detection (rows/columns matched correctly, border
       lines preserved) -- note this is *structural* correctness, not full
       layout fidelity; see the still-open item below
-- [ ] OCR for scanned/image-only PDFs
+- [x] OCR for scanned/image-only PDFs (optional -- see below)
 - [ ] Drag-and-drop file input
 - [ ] Persistent translation history
 - [ ] True layout-preserving PDF translation -- preserving each text block's

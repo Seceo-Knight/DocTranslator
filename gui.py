@@ -28,6 +28,7 @@ from tkinter import (
     HORIZONTAL,
     LEFT,
     RIGHT,
+    BooleanVar,
     StringVar,
     Tk,
     X,
@@ -40,6 +41,7 @@ from tkinter.scrolledtext import ScrolledText
 
 from document_handler import SUPPORTED_EXTENSIONS, extract_sample_texts, translate_file
 from lang_detect import detect_language_for_document
+from ocr_engine import OCREngine
 from translator_engine import LANG_TAGS, TranslationEngine
 
 LANGUAGES = list(LANG_TAGS.keys())  # ["English", "Hindi", "Marathi"]
@@ -53,6 +55,7 @@ class DocumentTranslatorApp:
 
         self.log_queue: "queue.Queue[str]" = queue.Queue()
         self.engine: TranslationEngine | None = None
+        self.ocr_engine: OCREngine | None = None
         self.worker_thread: threading.Thread | None = None
 
         self.input_path = StringVar()
@@ -60,6 +63,11 @@ class DocumentTranslatorApp:
         self.mode = StringVar(value="file")  # "file" or "folder"
         self.src_lang = StringVar(value="Auto-detect")
         self.tgt_lang = StringVar(value="Hindi")
+        # Off by default: OCR pulls in a heavier dependency (easyocr, plus
+        # its own model downloads) than the rest of this tool needs, so it's
+        # opt-in rather than something that silently triggers a new install
+        # the first time someone happens to feed it a scanned PDF.
+        self.enable_ocr = BooleanVar(value=False)
 
         self._build_widgets()
         self.root.after(100, self._drain_log_queue)
@@ -103,6 +111,11 @@ class DocumentTranslatorApp:
             lang_frame, textvariable=self.tgt_lang, state="readonly",
             values=LANGUAGES, width=14,
         ).pack(side=LEFT)
+
+        ttk.Checkbutton(
+            lang_frame, text="OCR scanned PDFs (needs easyocr; downloads OCR models on first use)",
+            variable=self.enable_ocr,
+        ).pack(side=LEFT, padx=(16, 0))
 
         out_frame = ttk.LabelFrame(self.root, text="3. Output folder")
         out_frame.pack(fill=X, **pad)
@@ -219,6 +232,11 @@ class DocumentTranslatorApp:
                 self.engine = TranslationEngine()
                 self.engine.on_status = self._log
 
+            if self.enable_ocr.get() and self.ocr_engine is None:
+                self.ocr_engine = OCREngine()
+                self.ocr_engine.on_status = self._log
+            ocr_engine = self.ocr_engine if self.enable_ocr.get() else None
+
             output_root = Path(output_dir)
             output_root.mkdir(parents=True, exist_ok=True)
 
@@ -241,6 +259,7 @@ class DocumentTranslatorApp:
                     src_lang,
                     tgt_lang,
                     progress_cb=self._log,
+                    ocr_engine=ocr_engine,
                 )
                 self._log(f"  Saved: {out_path}")
                 self.progress["value"] = (index / len(files)) * 100

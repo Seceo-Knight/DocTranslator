@@ -12,6 +12,7 @@ Entry point for DocumentTranslator.
 CLI examples:
     python app.py --cli report.docx --from English --to Hindi
     python app.py --cli ./docs_folder --from Auto --to Marathi --out ./translated_docs
+    python app.py --cli scanned_report.pdf --from English --to Hindi --ocr
 
 This is also the script PyInstaller packages into DocumentTranslator.exe
 (see build_exe.bat) -- by default double-clicking the exe opens the GUI.
@@ -25,6 +26,7 @@ from pathlib import Path
 
 from document_handler import SUPPORTED_EXTENSIONS, extract_sample_texts, translate_file
 from lang_detect import detect_language_for_document
+from ocr_engine import OCREngine
 from translator_engine import LANG_TAGS, TranslationEngine
 
 LANGUAGES = list(LANG_TAGS.keys())
@@ -53,6 +55,11 @@ def run_cli(args: argparse.Namespace) -> int:
     engine = TranslationEngine()
     engine.on_status = print
 
+    ocr_engine = None
+    if args.ocr:
+        ocr_engine = OCREngine()
+        ocr_engine.on_status = print
+
     for file_path in files:
         print(f"Translating {file_path.name}...")
 
@@ -68,7 +75,10 @@ def run_cli(args: argparse.Namespace) -> int:
             continue
 
         out_path = output_dir / f"{file_path.stem}_{args.tgt}{file_path.suffix}"
-        translate_file(str(file_path), str(out_path), engine.translate_batch, src_lang, args.tgt, progress_cb=print)
+        translate_file(
+            str(file_path), str(out_path), engine.translate_batch, src_lang, args.tgt,
+            progress_cb=print, ocr_engine=ocr_engine,
+        )
         print(f"  Saved: {out_path}")
 
     print("Done.")
@@ -82,6 +92,10 @@ def main() -> None:
     parser.add_argument("--from", dest="src", default="Auto-detect", choices=["Auto-detect"] + LANGUAGES)
     parser.add_argument("--to", dest="tgt", default="Hindi", choices=LANGUAGES)
     parser.add_argument("--out", dest="out", default="translated_docs")
+    parser.add_argument(
+        "--ocr", action="store_true",
+        help="Enable OCR for scanned/image-only PDF pages (requires easyocr; downloads OCR models on first use)",
+    )
 
     args = parser.parse_args()
 
