@@ -328,11 +328,21 @@ whichever machine will run the exe before its first launch, or set an
 - [x] Progress bar / log pane
 - [x] Offline mode after first model download
 - [x] Windows .exe packaging script
+- [x] Chemical formula and glossary protection (avoid mistranslating
+      technical/product names)
+- [x] PDF table structure detection (rows/columns matched correctly, border
+      lines preserved) -- note this is *structural* correctness, not full
+      layout fidelity; see the still-open item below
 - [ ] OCR for scanned/image-only PDFs
 - [ ] Drag-and-drop file input
 - [ ] Persistent translation history
-- [ ] True layout-preserving PDF translation (would need a PDF layout engine,
-      not just block redraw)
+- [ ] True layout-preserving PDF translation -- preserving each text block's
+      original font/size/color/bold-italic, and reflowing text across lines
+      or pushing content down when a translation is longer than the
+      original, instead of shrinking font size to force-fit the same box.
+      Would need an actual page-layout/typesetting engine, not just
+      block-level redraw -- a meaningfully bigger project than what's built
+      here.
 
 ## Known limitations
 
