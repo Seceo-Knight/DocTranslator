@@ -1,0 +1,20 @@
+# DocTranslator glossary / do-not-translate list
+#
+# One term per line. Lines starting with # (like this one) and blank lines
+# are ignored.
+#
+# Any term listed here is matched case-insensitively as a whole word/phrase
+# in your source document and passed straight through to the translated
+# output completely untouched -- exact original spelling, exact original
+# script, no translation attempt at all.
+#
+# Use this for chemical/product/brand names a general-purpose translation
+# model has no reliable way to translate correctly -- things like a specific
+# compound name, a proprietary product name, or a lab/project codename.
+# Plain chemical formulas (H2SO4, NaOH, C6H12O6, etc.) don't need to be
+# listed here -- those are already detected and protected automatically.
+#
+# Examples (remove the # to activate a line, or add your own below):
+# Chemsortia
+# Sulfuric Acid
+# Sodium Hydroxide

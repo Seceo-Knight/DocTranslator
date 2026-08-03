@@ -30,6 +30,7 @@ DocumentTranslator/
 ├── fonts/                  # Bundled Devanagari font for PDF output (see below)
 │   ├── Shobhika-Regular.otf
 │   └── Shobhika-Bold.otf
+├── glossary.txt            # Your do-not-translate list (chemical/product names)
 ├── requirements.txt
 ├── build_exe.bat           # PyInstaller packaging script (run on Windows)
 └── translated_docs/        # default output folder
@@ -211,6 +212,38 @@ folder into the packaged exe via `--add-data`, so this works after packaging
 too, not just when running from source.
 
 ---
+
+## Protecting chemical names and technical terms from mistranslation
+
+General-purpose translation models weren't trained heavily on chemical
+nomenclature, and will happily "translate" a formula or product name into
+something wrong. Two layers of protection are built in:
+
+1. **Chemical formulas are detected automatically.** Anything shaped like a
+   sequence of element symbols -- `H2SO4`, `NaOH`, `C6H12O6`, `CO2`, `Fe2O3`,
+   and so on -- is recognized by a pattern in `indic_processor.py` and passed
+   straight through untranslated, in its exact original form. This also
+   catches plain acronyms (`CEO`, `PDF`, `USA`), which is a side effect, not
+   a bug -- acronyms usually shouldn't be translated either. Nothing to
+   configure; this runs on every document automatically.
+
+2. **Named compounds and product names go in `glossary.txt`.** A formula
+   pattern can't guess that "Chemsortia" (or any other specific compound or
+   brand/product name) shouldn't be translated -- there's no pattern to
+   detect, it just looks like an ordinary word. For these, list the term in
+   `glossary.txt` (one per line; lines starting with `#` are comments/ignored).
+   Any term listed there is matched case-insensitively as a whole word/phrase
+   and passed through to the output exactly as written in your source
+   document, in every language direction. The file ships with a commented-out
+   example -- just add your own terms below it.
+
+   Known minor limitation: if a glossary term (or a chemical formula) is
+   directly glued to another word with a hyphen and no space (e.g.
+   `Chemsortia-lite` with no space before the hyphen), the underlying English
+   tokenizer can occasionally reinsert a stray space at that hyphen in the
+   output. This doesn't affect the protected term itself -- it comes through
+   correctly either way -- only the spacing immediately around an attached
+   hyphen-suffix in that specific pattern.
 
 ## How structure is preserved
 

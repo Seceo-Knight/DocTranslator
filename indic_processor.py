@@ -19,10 +19,27 @@ data tables are unchanged. It depends only on `indic-nlp-library`,
 
 Credit: original implementation by Varun Gumma, Jay Gala, Pranjal Chitale,
 and Raj Dabre (AI4Bharat / IndicTransToolkit, MIT license).
+
+DocTranslator-specific addition (not part of the original IndicTransToolkit
+algorithm): two extra placeholder-masking passes, added below alongside the
+original email/URL/numeral masking, so that terms which a general-purpose
+translation model would otherwise mangle get passed through untouched instead:
+
+  - Chemical formulas (H2SO4, NaOH, C6H12O6, ...) are detected automatically
+    with a regex -- see _CHEM_FORMULA_PATTERN.
+  - Named compounds / product names that don't follow a detectable pattern
+    (e.g. a specific trade name) can be listed by the user in glossary.txt,
+    one term per line -- see _load_glossary().
+
+Both run *before* the original email/URL/numeral masking so their
+placeholder tokens can't collide with each other (see the ordering comment
+in _wrap_with_placeholders).
 """
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from queue import Queue
 
 import regex as re
@@ -30,6 +47,42 @@ from indicnlp.normalize.indic_normalize import IndicNormalizerFactory
 from indicnlp.tokenize import indic_detokenize, indic_tokenize
 from indicnlp.transliterate.unicode_transliterate import UnicodeIndicTransliterator
 from sacremoses import MosesDetokenizer, MosesPunctNormalizer, MosesTokenizer
+
+
+def _project_root() -> Path:
+    """
+    Where glossary.txt lives. When running from source this is the folder
+    containing this file; when packaged by PyInstaller, sys.executable is
+    the .exe itself, so its folder is used instead -- that's the location a
+    user can actually find and edit after building, since PyInstaller's
+    bundled resources aren't meant to be hand-edited post-build.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def load_glossary(path: Path = None) -> list:
+    """
+    Loads the user-maintained do-not-translate list from glossary.txt (one
+    term per line; blank lines and lines starting with # are ignored). Terms
+    are matched case-insensitively as whole words/phrases in the source text
+    and pass through the translation completely untouched, in their original
+    spelling and script -- for chemical/product names a generic translation
+    model has no reliable way to render correctly (e.g. a specific compound
+    or brand name). Returns [] if the file doesn't exist -- this feature is
+    opt-in, not required.
+    """
+    path = path or (_project_root() / "glossary.txt")
+    if not path.exists():
+        return []
+    terms = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        terms.append(line)
+    return terms
 
 
 class IndicProcessor:
@@ -107,6 +160,26 @@ class IndicProcessor:
         self._EMAIL_PATTERN = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}")
         self._OTHER_PATTERN = re.compile(r"[A-Za-z0-9]*[#|@]\w+")
 
+        # --- DocTranslator additions: chemical formulas + glossary ---------
+        # Matches sequences of 2+ "element-symbol"-shaped groups back to back
+        # (one capital letter, optional single lowercase, optional digits),
+        # e.g. H2SO4, NaOH, C6H12O6, CO2, Fe2O3. The trailing \b is essential:
+        # without it, this can partial-match into ordinary capitalized words
+        # (e.g. matching just "McDo" inside "McDonald"); \b only allows the
+        # match to end where a real word boundary exists, so it can't stop
+        # mid-word -- ordinary words are left alone. As a side effect this
+        # also protects plain acronyms (PDF, CEO, USA) from being mangled by
+        # translation, which is desirable for the same reason.
+        self._CHEM_FORMULA_PATTERN = re.compile(r"\b(?:[A-Z][a-z]?\d*){2,}\b")
+
+        self._glossary_terms = load_glossary()
+        self._GLOSSARY_PATTERN = None
+        if self._glossary_terms:
+            # Longest-first so multi-word glossary entries match before a
+            # shorter overlapping substring would.
+            escaped = sorted((re.escape(t) for t in self._glossary_terms), key=len, reverse=True)
+            self._GLOSSARY_PATTERN = re.compile(r"\b(?:" + "|".join(escaped) + r")\b", re.IGNORECASE)
+
         self._PUNC_REPLACEMENTS = [
             (re.compile(r"\r"), ""),
             (re.compile(r"\(\s*"), "("),
@@ -150,7 +223,26 @@ class IndicProcessor:
     def _wrap_with_placeholders(self, text: str) -> str:
         serial_no = 1
         placeholder_entity_map: dict = {}
-        patterns = [self._EMAIL_PATTERN, self._URL_PATTERN, self._NUMERAL_PATTERN, self._OTHER_PATTERN]
+        # Ordering here matters a lot: each pattern in this list runs against
+        # whatever text the *previous* patterns already left behind, so an
+        # earlier pattern's own "<IDn>" placeholders are visible to every
+        # later pattern's regex.
+        #
+        # _CHEM_FORMULA_PATTERN matches "capital letter + digit" shapes, and
+        # "<ID1>" itself is exactly that shape ("I" + "D1"). So it MUST run
+        # before anything that could have already inserted an "<IDn>" token,
+        # or it will re-wrap that placeholder and corrupt it (nested
+        # "<<ID2>>"-style breakage) -- this is why it comes first, even
+        # before the glossary.
+        #
+        # The glossary pattern only matches the user's literal listed terms,
+        # never a generic "<IDn>" shape, so it's safe to run after the
+        # chemical-formula pass. Email/URL/numeral/other were already
+        # confirmed safe to run last (see their own docstring/comments).
+        patterns = [self._CHEM_FORMULA_PATTERN]
+        if self._GLOSSARY_PATTERN is not None:
+            patterns.append(self._GLOSSARY_PATTERN)
+        patterns.extend([self._EMAIL_PATTERN, self._URL_PATTERN, self._NUMERAL_PATTERN, self._OTHER_PATTERN])
 
         for pattern in patterns:
             matches = set(pattern.findall(text))
