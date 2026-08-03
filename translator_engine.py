@@ -26,7 +26,9 @@ Language tags used by IndicTrans2 (FLORES-200 style):
 
 from __future__ import annotations
 
+import sys
 import threading
+from pathlib import Path
 from typing import List
 
 import torch
@@ -57,6 +59,38 @@ INDIC_EN_MODEL = "ai4bharat/indictrans2-indic-en-dist-200M"
 
 # Batch size for a single generate() call. Larger = faster but more RAM/VRAM.
 DEFAULT_BATCH_SIZE = 8
+
+
+def _project_root() -> Path:
+    """
+    Same convention used elsewhere in this project (see indic_processor.py /
+    document_handler.py): when frozen by PyInstaller, resources live next to
+    the .exe; when running from source, they live next to this script.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def _resolve_model_path(model_name: str) -> str:
+    """
+    Whoever BUILDS the distributed .exe can pre-download the model files once
+    (see download_models.py) into a local models/ folder that gets bundled
+    into the packaged app. If that folder is present, load the model from
+    there directly -- the transformers/tokenizer files (including the custom
+    modeling_indictrans.py that trust_remote_code needs) are loaded straight
+    off disk, so end users never contact Hugging Face, never need an account
+    or token, and don't even need an internet connection on first run.
+
+    If the folder isn't present (the normal case when running from source
+    during development), fall back to the plain model ID, which transformers
+    downloads from the Hugging Face Hub the usual way -- this is the path
+    that requires `huggingface-cli login` once, as documented in the README.
+    """
+    local_dir = _project_root() / "models" / model_name.split("/")[-1]
+    if local_dir.is_dir():
+        return str(local_dir)
+    return model_name
 
 
 class TranslationEngine:
@@ -100,11 +134,16 @@ class TranslationEngine:
         with self._lock:
             if model_name in self._models:  # re-check after acquiring the lock
                 return
-            self._log(f"Loading model {model_name} (first run downloads it)...")
-            tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+            load_path = _resolve_model_path(model_name)
+            bundled = load_path != model_name
+            self._log(
+                f"Loading model {model_name} "
+                + ("(bundled locally, no download needed)..." if bundled else "(first run downloads it)...")
+            )
+            tokenizer = AutoTokenizer.from_pretrained(load_path, trust_remote_code=True)
             dtype = torch.float16 if self.device == "cuda" else torch.float32
             model = AutoModelForSeq2SeqLM.from_pretrained(
-                model_name,
+                load_path,
                 trust_remote_code=True,
                 dtype=dtype,
             ).to(self.device)

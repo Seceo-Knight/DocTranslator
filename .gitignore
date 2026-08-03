@@ -19,6 +19,12 @@ translated_docs/
 # Hugging Face cache (if it ever ends up inside the project folder)
 .cache/
 
+# Pre-downloaded model weights (see download_models.py) -- multi-GB, never
+# commit these to git. Distribute them by bundling into the built exe
+# (build_exe.bat picks this folder up automatically if present), or as a
+# separate download alongside the exe -- not via git.
+models/
+
 # OS cruft
 .DS_Store
 Thumbs.db

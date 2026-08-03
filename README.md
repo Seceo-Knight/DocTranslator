@@ -360,12 +360,71 @@ keeps all the supporting files alongside it (this starts much faster than
 PyInstaller's single-file `--onefile` mode for a project this size, which
 would otherwise re-extract everything into a temp folder on every launch).
 
-Model weights are intentionally *not* bundled into the exe (they're
-multi-GB and gated by license). The packaged app downloads them into
-`%USERPROFILE%\.cache\huggingface` on first run, exactly like running from
-source, then works offline after that. Run `huggingface-cli login` once on
-whichever machine will run the exe before its first launch, or set an
-`HF_TOKEN` environment variable for users who'll run it unattended.
+By default, model weights are *not* bundled into the exe -- the packaged app
+downloads them into `%USERPROFILE%\.cache\huggingface` on first run, exactly
+like running from source, then works offline after that. This is fine if
+you're the only one who'll ever run the exe, but it means every recipient
+needs their own Hugging Face account and `huggingface-cli login`. **If
+you're handing this exe to other people, see the next section** --
+`download_models.py` removes that requirement entirely.
+
+---
+
+## Distributing to other people (no Hugging Face account needed for them)
+
+The IndicTrans2 model repos are "gated" on Hugging Face: downloading them
+normally requires an account, accepting the model license, and a personal
+access token. That's a reasonable one-time step for *you*, the developer, but
+it doesn't scale to "give this exe to a bunch of people" -- you can't ask
+every recipient to sign up for Hugging Face just to translate a document.
+
+The gating is only Hugging Face's access control on downloads *from their
+servers* -- it isn't DRM inside the model files, and IndicTrans2 is
+MIT-licensed, which explicitly permits redistributing the files themselves.
+So the fix is: download the model files **once**, yourself, and bundle those
+actual files into the exe. Recipients then load the model straight off local
+disk -- no Hugging Face account, no token, no internet connection required,
+even on their very first run.
+
+Steps (do this once, before running `build_exe.bat`):
+
+```
+huggingface-cli login          (if you haven't already)
+python download_models.py
+build_exe.bat
+```
+
+`download_models.py` downloads both IndicTrans2 checkpoints into a local
+`models/` folder. `build_exe.bat` detects that folder automatically and
+bundles it into `dist\DocumentTranslator` alongside everything else --
+nothing else needs to change, and no code path needs to know which mode
+you're in; `translator_engine.py` just prefers the local folder over the
+network whenever it's present.
+
+Tradeoffs to weigh:
+
+- **Bundled (`download_models.py` + build):** `dist\DocumentTranslator` grows
+  by roughly 700MB-1GB (two ~200M-parameter models plus tokenizers), but
+  every recipient gets a true zero-setup, zero-account, works-offline-on-
+  first-launch experience. This is the right choice for handing the tool to
+  a team, a lab, or anyone outside yourself.
+- **Not bundled (skip that step):** smaller download for you to distribute,
+  but each recipient must create their own Hugging Face account, accept the
+  IndicTrans2 license, generate a token, and run `huggingface-cli login`
+  before their first translation -- real friction, and not realistic to ask
+  of many people.
+
+One option this project deliberately does *not* use: baking a single shared
+Hugging Face token into the app so everyone authenticates as "you" behind the
+scenes. That still requires every user to have internet on first run, and
+anyone who unpacks the exe can extract the token from it, which risks it
+getting abused or revoked for everyone at once. Bundling the actual files is
+simpler and has none of those failure modes.
+
+If your use case is genuinely commercial/at-scale redistribution beyond your
+own team or lab, it's worth double-checking the current license terms on
+each model's Hugging Face page yourself before shipping widely -- this
+project isn't legal advice, and license terms can change.
 
 ---
 
@@ -385,6 +444,9 @@ whichever machine will run the exe before its first launch, or set an
       lines preserved) -- note this is *structural* correctness, not full
       layout fidelity; see the still-open item below
 - [x] OCR for scanned/image-only PDFs (optional -- see below)
+- [x] Zero-setup distribution to other users (bundle model weights into the
+      exe via `download_models.py`, so recipients need no Hugging Face
+      account/token -- see "Distributing to other people" above)
 - [ ] Drag-and-drop file input
 - [ ] Persistent translation history
 - [ ] True layout-preserving PDF translation -- preserving each text block's

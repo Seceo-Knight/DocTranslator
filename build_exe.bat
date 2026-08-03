@@ -7,12 +7,21 @@ REM IMPORTANT: this must be run ON WINDOWS, inside the activated venv, with
 REM all of requirements.txt already installed. PyInstaller cross-compiles
 REM nothing -- it bundles whatever Python/OS it runs on.
 REM
-REM Model weights are NOT bundled (they are multi-GB and gated on Hugging
-REM Face). The exe downloads them into %USERPROFILE%\.cache\huggingface on
-REM first run, then works fully offline afterwards. Run
-REM     huggingface-cli login
-REM once beforehand with a token that has accepted the IndicTrans2 model
-REM licenses, or the first-run download will fail with a 401 error.
+REM Model weights: if you want end users to need ZERO Hugging Face setup
+REM (recommended for handing this exe to other people), run this first:
+REM     python download_models.py
+REM That downloads the two IndicTrans2 checkpoints into a local models\
+REM folder ONCE (using your own already-logged-in HF account), and this
+REM script below bundles that folder into the exe automatically if it
+REM exists. Recipients then load models straight off disk -- no account, no
+REM token, no internet needed even on first run. This does add roughly
+REM 700MB-1GB to the dist\ folder.
+REM
+REM If you skip download_models.py, the exe instead downloads the models
+REM into %USERPROFILE%\.cache\huggingface the first time EACH person runs
+REM it, which means each of them needs their own Hugging Face account/token
+REM (see README for `huggingface-cli login`) -- fine for just yourself, not
+REM realistic for distributing to many people.
 REM
 REM OCR (easyocr) is NOT bundled by this script, since it's an optional
 REM feature most users won't need (see requirements-ocr.txt / the README's
@@ -26,11 +35,21 @@ REM ---------------------------------------------------------------------
 
 call venv\Scripts\activate
 
+set MODELS_ARG=
+if exist "models\" (
+    echo Found local models\ folder -- bundling it so end users need no Hugging Face account.
+    set MODELS_ARG=--add-data "models;models"
+) else (
+    echo No local models\ folder found -- exe will download models from Hugging Face on first
+    echo run for whoever uses it ^(run download_models.py first if you want to avoid that^).
+)
+
 pyinstaller ^
     --name DocumentTranslator ^
     --onedir ^
     --windowed ^
     --add-data "fonts;fonts" ^
+    %MODELS_ARG% ^
     --collect-all torch ^
     --collect-all transformers ^
     --collect-all indicnlp ^
