@@ -27,6 +27,9 @@ DocumentTranslator/
 ├── indic_processor.py      # Pure-Python pre/post-processing (see note below)
 ├── document_handler.py     # DOCX/TXT/PDF structure-preserving read-write
 ├── lang_detect.py          # English/Hindi/Marathi auto-detection
+├── fonts/                  # Bundled Devanagari font for PDF output (see below)
+│   ├── Shobhika-Regular.otf
+│   └── Shobhika-Bold.otf
 ├── requirements.txt
 ├── build_exe.bat           # PyInstaller packaging script (run on Windows)
 └── translated_docs/        # default output folder
@@ -195,6 +198,18 @@ Harmless -- newer `transformers` renamed that constructor argument. Fixed by
 using `dtype=` instead of `torch_dtype=` when loading the model in
 `translator_engine.py`. Already applied in this repo.
 
+**Translated PDF shows question marks (`?`) instead of Hindi/Marathi text**
+PyMuPDF's built-in fonts (Helvetica, Times, etc.) only have Latin-script
+glyphs -- there's no Devanagari in them at all, so any Devanagari character
+falls back to `?`. Fixed by bundling a real Devanagari font
+(`fonts/Shobhika-Regular.otf`, IIT Bombay, SIL Open Font License) and
+embedding it into the PDF automatically whenever the target language is
+Hindi or Marathi (see `_font_for_language` in `document_handler.py`). English
+output keeps using PyMuPDF's built-in Helvetica -- no font file needed there.
+Already applied in this repo; `build_exe.bat` also bundles the `fonts/`
+folder into the packaged exe via `--add-data`, so this works after packaging
+too, not just when running from source.
+
 ---
 
 ## How structure is preserved
@@ -299,4 +314,7 @@ whichever machine will run the exe before its first launch, or set an
 This project's own code has no license restrictions stated here -- add one
 if you plan to distribute it. It depends on IndicTrans2 (MIT, AI4Bharat) and
 reuses pre/post-processing logic originally from IndicTransToolkit (MIT,
-Varun Gumma et al.).
+Varun Gumma et al.). The bundled font `fonts/Shobhika-Regular.otf` (and
+`Shobhika-Bold.otf`) is Shobhika 1.05 by the Indian Institute of Technology
+Bombay, licensed under the SIL Open Font License 1.1 -- free to embed and
+redistribute, including in packaged/commercial applications.

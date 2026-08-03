@@ -40,10 +40,37 @@ are not handled -- that needs OCR, listed as a future improvement.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
-from typing import Callable, List
+from typing import Callable, List, Optional, Tuple
 
 TranslatorFn = Callable[[List[str], str, str], List[str]]
+
+
+def _assets_dir() -> Path:
+    """
+    Resolves the project's bundled `fonts/` directory both when running from
+    source and when packaged by PyInstaller (which unpacks data files into a
+    temp dir referenced by sys._MEIPASS instead of alongside this .py file).
+    """
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return base / "fonts"
+
+
+# PyMuPDF's built-in fonts (Helvetica, Times, etc.) only cover Latin script --
+# they render Devanagari as boxes/question marks. Hindi and Marathi both use
+# Devanagari, so PDF output in either language needs a real Devanagari font
+# embedded. Shobhika (IIT Bombay, SIL Open Font License) is bundled in
+# fonts/ for exactly this. English output keeps using PyMuPDF's built-in
+# Helvetica -- no embedding needed for Latin script.
+_DEVANAGARI_FONT_FILE = _assets_dir() / "Shobhika-Regular.otf"
+
+
+def _font_for_language(lang: str) -> Tuple[str, Optional[str]]:
+    """Returns (fontname, fontfile) for use with page.insert_textbox()."""
+    if lang in ("Hindi", "Marathi") and _DEVANAGARI_FONT_FILE.exists():
+        return "shobhika-devanagari", str(_DEVANAGARI_FONT_FILE)
+    return "helv", None
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +170,10 @@ def translate_txt(
 # PDF (best-effort)
 # ---------------------------------------------------------------------------
 
-def _insert_shrink_to_fit(page, rect, text: str, start_size: int = 10, min_size: int = 5) -> None:
+def _insert_shrink_to_fit(
+    page, rect, text: str, fontname: str = "helv", fontfile: Optional[str] = None,
+    start_size: int = 10, min_size: int = 5,
+) -> None:
     """
     PyMuPDF's insert_textbox does not auto-fit text to a box: the bounding
     box PyMuPDF reports for the *original* text is usually a point or two too
@@ -152,15 +182,23 @@ def _insert_shrink_to_fit(page, rect, text: str, start_size: int = 10, min_size:
     rect silently fails (no text drawn, no error). Pad the box slightly and
     step the font size down until it fits; if even the minimum size overflows,
     insert at the minimum size anyway rather than lose the text entirely.
+
+    fontname/fontfile select which font to embed -- PyMuPDF's built-in fonts
+    (the default "helv") have no Devanagari glyphs, so Hindi/Marathi output
+    must pass a real font file here (see _font_for_language) or it renders as
+    "?" placeholders.
     """
     import fitz
 
     padded = fitz.Rect(rect.x0 - 1, rect.y0 - 1, rect.x1 + 2, rect.y1 + 4)
+    kwargs = {"fontname": fontname, "align": 0}
+    if fontfile:
+        kwargs["fontfile"] = fontfile
     for size in range(start_size, min_size - 1, -1):
-        remaining_space = page.insert_textbox(padded, text, fontsize=size, fontname="helv", align=0)
+        remaining_space = page.insert_textbox(padded, text, fontsize=size, **kwargs)
         if remaining_space >= 0:
             return
-    page.insert_textbox(padded, text, fontsize=min_size, fontname="helv", align=0)
+    page.insert_textbox(padded, text, fontsize=min_size, **kwargs)
 
 
 def translate_pdf(
@@ -201,9 +239,13 @@ def translate_pdf(
     for page in doc:
         page.apply_redactions()
 
+    fontname, fontfile = _font_for_language(tgt_lang)
+    if progress_cb and fontfile:
+        progress_cb(f"Using embedded Devanagari font for {tgt_lang} output.")
+
     for (page_index, rect, _original), new_text in zip(all_blocks, translated):
         page = doc[page_index]
-        _insert_shrink_to_fit(page, rect, new_text)
+        _insert_shrink_to_fit(page, rect, new_text, fontname=fontname, fontfile=fontfile)
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     doc.save(output_path)

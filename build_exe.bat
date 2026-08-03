@@ -21,6 +21,7 @@ pyinstaller ^
     --name DocumentTranslator ^
     --onedir ^
     --windowed ^
+    --add-data "fonts;fonts" ^
     --collect-all torch ^
     --collect-all transformers ^
     --collect-all indicnlp ^
