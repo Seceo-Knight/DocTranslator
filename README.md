@@ -31,9 +31,14 @@ DocumentTranslator/
 ├── fonts/                  # Bundled Devanagari font for PDF output (see below)
 │   ├── Shobhika-Regular.otf
 │   └── Shobhika-Bold.otf
+├── assets/                 # App branding: exe icon + in-app logo (see below)
+│   ├── icon.ico
+│   └── logo.png
 ├── glossary.txt            # Your do-not-translate list (chemical/product names)
 ├── requirements.txt
 ├── requirements-ocr.txt    # Optional extra dependency for OCR support
+├── download_models.py      # One-time: bundle translation models for distribution
+├── download_ocr_models.py  # One-time: bundle OCR models for distribution
 ├── build_exe.bat           # PyInstaller packaging script (run on Windows)
 └── translated_docs/        # default output folder
 ```
@@ -354,6 +359,14 @@ OS/Python it's run on -- it cannot cross-compile a Windows exe from Linux or
 Mac, which is why this step has to happen on the actual Windows machine (not,
 for example, in a cloud build).
 
+**Branding:** the exe ships with its own icon (`assets/icon.ico`) and the GUI
+has a branded header with the same logo (`assets/logo.png`) plus a "Developed
+by Vaibhav Handekar" credit in the footer. Both files are generated assets
+already committed to the repo -- nothing to set up, `build_exe.bat` picks
+them up automatically (`--icon` for the exe file icon, `--add-data` to bundle
+`logo.png` for the in-app header). Swap either file for your own artwork any
+time; the app looks for exactly `assets/icon.ico` and `assets/logo.png`.
+
 The script runs:
 
 ```
@@ -361,6 +374,9 @@ pyinstaller ^
     --name DocumentTranslator ^
     --onedir ^
     --windowed ^
+    --icon "assets\icon.ico" ^
+    --add-data "fonts;fonts" ^
+    --add-data "assets;assets" ^
     --collect-all torch ^
     --collect-all transformers ^
     --collect-all indicnlp ^

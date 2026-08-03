@@ -19,16 +19,22 @@ strings onto a queue.Queue; the GUI thread drains that queue on a timer.
 from __future__ import annotations
 
 import queue
+import sys
 import threading
 import traceback
 from pathlib import Path
 from tkinter import (
     BOTH,
+    BOTTOM,
     END,
     HORIZONTAL,
     LEFT,
     RIGHT,
+    TOP,
     BooleanVar,
+    Frame,
+    Label,
+    PhotoImage,
     StringVar,
     Tk,
     X,
@@ -46,12 +52,39 @@ from translator_engine import LANG_TAGS, TranslationEngine
 
 LANGUAGES = list(LANG_TAGS.keys())  # ["English", "Hindi", "Marathi"]
 
+# Branding colors, matching assets/logo.png (indigo -> teal gradient badge).
+INDIGO_DARK = "#312e81"
+INDIGO = "#4338CA"
+TEAL = "#0d9488"
+LIGHT_BG = "#f4f5f7"
+
+
+def _assets_dir() -> Path:
+    """
+    Resolves the bundled assets/ folder (logo.png, icon.ico) both when
+    running from source and when packaged by PyInstaller. Same convention as
+    document_handler._assets_dir() for fonts/ -- these are static bundled
+    files, not something a user edits (contrast with the project-root
+    convention used for glossary.txt / models/, which sit next to the exe so
+    they're editable without a rebuild).
+    """
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return base / "assets"
+
+
+ASSETS_DIR = _assets_dir()
+
 
 class DocumentTranslatorApp:
     def __init__(self, root: Tk):
         self.root = root
-        self.root.title("Document Translator (IndicTrans2 - Offline)")
-        self.root.geometry("720x560")
+        self.root.title("DocumentTranslator by Vaibhav Handekar")
+        self.root.geometry("760x620")
+        self.root.configure(bg=LIGHT_BG)
+        self.root.minsize(680, 560)
+
+        self._apply_theme()
+        self._set_window_icon()
 
         self.log_queue: "queue.Queue[str]" = queue.Queue()
         self.engine: TranslationEngine | None = None
@@ -74,8 +107,57 @@ class DocumentTranslatorApp:
 
     # -- UI construction ------------------------------------------------------
 
+    def _apply_theme(self) -> None:
+        """A slightly more polished look than Tk's raw default theme, using
+        the same indigo/teal palette as assets/logo.png."""
+        style = ttk.Style(self.root)
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass  # fall back to whatever theme is available on this platform
+
+        style.configure(".", background=LIGHT_BG)
+        style.configure("TFrame", background=LIGHT_BG)
+        style.configure("TLabelframe", background=LIGHT_BG, bordercolor="#d1d5db")
+        style.configure(
+            "TLabelframe.Label", background=LIGHT_BG, foreground=INDIGO_DARK,
+            font=("Segoe UI", 10, "bold"),
+        )
+        style.configure("TLabel", background=LIGHT_BG, font=("Segoe UI", 10))
+        style.configure("TCheckbutton", background=LIGHT_BG, font=("Segoe UI", 9))
+        style.configure("TRadiobutton", background=LIGHT_BG, font=("Segoe UI", 10))
+        style.configure(
+            "Accent.TButton", font=("Segoe UI", 10, "bold"),
+            background=TEAL, foreground="white",
+        )
+        style.map(
+            "Accent.TButton",
+            background=[("active", INDIGO), ("disabled", "#9ca3af")],
+        )
+        style.configure("TProgressbar", background=TEAL, troughcolor="#e5e7eb")
+
+    def _set_window_icon(self) -> None:
+        """Sets both the title-bar icon and the OS taskbar icon. Wrapped in
+        try/except since .ico support via iconbitmap is Windows-specific --
+        harmless if this ever runs on Linux/Mac during development."""
+        icon_ico = ASSETS_DIR / "icon.ico"
+        icon_png = ASSETS_DIR / "logo.png"
+        try:
+            if icon_ico.exists():
+                self.root.iconbitmap(str(icon_ico))
+        except Exception:
+            pass
+        try:
+            if icon_png.exists():
+                self._taskbar_icon = PhotoImage(file=str(icon_png))
+                self.root.iconphoto(True, self._taskbar_icon)
+        except Exception:
+            pass
+
     def _build_widgets(self) -> None:
         pad = {"padx": 10, "pady": 6}
+
+        self._build_header()
 
         mode_frame = ttk.LabelFrame(self.root, text="1. Choose input")
         mode_frame.pack(fill=X, **pad)
@@ -134,10 +216,52 @@ class DocumentTranslatorApp:
         self.progress = ttk.Progressbar(action_frame, orient=HORIZONTAL, mode="determinate")
         self.progress.pack(side=LEFT, fill=X, expand=True, padx=10)
 
+        # Packed with side=BOTTOM *before* log_frame below so it reserves its
+        # strip at the very bottom of the window; log_frame then expands to
+        # fill whatever vertical space remains above it.
+        footer = Frame(self.root, bg=LIGHT_BG)
+        footer.pack(side=BOTTOM, fill=X, padx=10, pady=(0, 8))
+        Label(
+            footer, text="Developed by Vaibhav Handekar", bg=LIGHT_BG,
+            fg="#6b7280", font=("Segoe UI", 8, "italic"),
+        ).pack(side=RIGHT)
+
         log_frame = ttk.LabelFrame(self.root, text="Log")
         log_frame.pack(fill=BOTH, expand=True, **pad)
         self.log_widget = ScrolledText(log_frame, height=14, state="disabled", wrap="word")
         self.log_widget.pack(fill=BOTH, expand=True, padx=6, pady=6)
+
+    def _build_header(self) -> None:
+        """Branded banner across the top: logo + app name + tagline, on a
+        solid indigo background (plain tk.Frame/Label, not ttk, so the
+        colors aren't subject to the active ttk theme)."""
+        header = Frame(self.root, bg=INDIGO_DARK)
+        header.pack(side=TOP, fill=X)
+
+        inner = Frame(header, bg=INDIGO_DARK)
+        inner.pack(fill=X, padx=16, pady=12)
+
+        logo_path = ASSETS_DIR / "logo.png"
+        if logo_path.exists():
+            try:
+                raw = PhotoImage(file=str(logo_path))
+                # logo.png is 512x512; shrink it to a sensible header size.
+                factor = max(1, raw.width() // 56)
+                self._header_logo = raw.subsample(factor, factor)
+                Label(inner, image=self._header_logo, bg=INDIGO_DARK).pack(side=LEFT, padx=(0, 12))
+            except Exception:
+                pass
+
+        text_frame = Frame(inner, bg=INDIGO_DARK)
+        text_frame.pack(side=LEFT, fill=X, expand=True)
+        Label(
+            text_frame, text="DocumentTranslator", bg=INDIGO_DARK, fg="white",
+            font=("Segoe UI", 16, "bold"),
+        ).pack(anchor="w")
+        Label(
+            text_frame, text="Offline English ⇄ Hindi ⇄ Marathi document translation",
+            bg=INDIGO_DARK, fg="#c7d2fe", font=("Segoe UI", 9),
+        ).pack(anchor="w")
 
     def _refresh_browse_label(self) -> None:
         self.browse_button.config(

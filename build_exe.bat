@@ -33,6 +33,10 @@ REM easyocr_models\ folder that this script bundles in automatically if
 REM present. If you skip it, OCR still works in the built exe, but each
 REM person downloads EasyOCR's models the first time they use the OCR
 REM checkbox (no account needed for that part, unlike the main models).
+REM
+REM Branding: assets\icon.ico becomes the exe's file/taskbar icon
+REM (--icon below); assets\logo.png is bundled in via --add-data so gui.py
+REM can show it in the app's own header at runtime.
 REM ---------------------------------------------------------------------
 
 call venv\Scripts\activate
@@ -65,7 +69,9 @@ pyinstaller ^
     --name DocumentTranslator ^
     --onedir ^
     --windowed ^
+    --icon "assets\icon.ico" ^
     --add-data "fonts;fonts" ^
+    --add-data "assets;assets" ^
     %MODELS_ARG% ^
     %OCR_ARG% ^
     %OCR_MODELS_ARG% ^

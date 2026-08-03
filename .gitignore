@@ -29,6 +29,10 @@ models/
 # reasoning as models/ above, just smaller.
 easyocr_models/
 
+# Intermediate logo working file (assets/logo.png and assets/icon.ico are the
+# ones actually used/committed)
+assets/logo_master.png
+
 # OS cruft
 .DS_Store
 Thumbs.db
