@@ -22,7 +22,9 @@ offline afterward.
 
 from __future__ import annotations
 
+import sys
 import threading
+from pathlib import Path
 from typing import List, Tuple
 
 LANG_TO_EASYOCR_CODE = {
@@ -38,6 +40,25 @@ DEFAULT_OCR_DPI = 300
 # have a stray digitally-added character or two (e.g. a page number stamp),
 # so a strict "zero characters" check would miss the common case.
 SCANNED_TEXT_THRESHOLD = 20
+
+
+def _project_root() -> Path:
+    """Same convention as translator_engine._project_root() / indic_processor._project_root()."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def _bundled_ocr_models_dir() -> Path | None:
+    """
+    Mirrors translator_engine._resolve_model_path(): if download_ocr_models.py
+    was run once by whoever builds the exe, the OCR detection/recognition
+    files live in a local easyocr_models/ folder that gets bundled into the
+    package. If present, use it (and refuse to fall back to the network) so
+    the OCR feature is just as zero-setup for end users as translation is.
+    """
+    local_dir = _project_root() / "easyocr_models"
+    return local_dir if local_dir.is_dir() else None
 
 
 class OCREngine:
@@ -71,7 +92,6 @@ class OCREngine:
         with self._lock:
             if langs in self._readers:
                 return self._readers[langs]
-            self._log(f"Loading OCR models for {list(langs)} (first run downloads them)...")
             try:
                 import easyocr  # local import: keeps this module importable without easyocr installed
             except ImportError as exc:
@@ -79,7 +99,18 @@ class OCREngine:
                     "OCR support requires easyocr. Install it with:\n    pip install easyocr"
                 ) from exc
 
-            reader = easyocr.Reader(list(langs), gpu=False)
+            bundled_dir = _bundled_ocr_models_dir()
+            if bundled_dir is not None:
+                self._log(f"Loading OCR models for {list(langs)} (bundled locally, no download needed)...")
+                reader = easyocr.Reader(
+                    list(langs), gpu=False,
+                    model_storage_directory=str(bundled_dir),
+                    download_enabled=False,
+                )
+            else:
+                self._log(f"Loading OCR models for {list(langs)} (first run downloads them)...")
+                reader = easyocr.Reader(list(langs), gpu=False)
+
             self._readers[langs] = reader
             self._log("OCR models ready.")
             return reader

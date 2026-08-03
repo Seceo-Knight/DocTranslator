@@ -23,14 +23,16 @@ REM it, which means each of them needs their own Hugging Face account/token
 REM (see README for `huggingface-cli login`) -- fine for just yourself, not
 REM realistic for distributing to many people.
 REM
-REM OCR (easyocr) is NOT bundled by this script, since it's an optional
-REM feature most users won't need (see requirements-ocr.txt / the README's
-REM OCR section). If you installed requirements-ocr.txt and want OCR to work
-REM in the packaged exe too, add these three lines to the pyinstaller
-REM command below:
-REM     --collect-all easyocr ^
-REM     --collect-all torchvision ^
-REM     --collect-all cv2 ^
+REM OCR (easyocr) support: this script auto-detects whether easyocr is
+REM installed and includes it in the build if so (nothing to configure).
+REM If you also want the OCR feature to work with zero internet access for
+REM recipients (same reasoning as the models\ folder above), run this first:
+REM     python download_ocr_models.py
+REM which downloads EasyOCR's detector/recognizer files into a local
+REM easyocr_models\ folder that this script bundles in automatically if
+REM present. If you skip it, OCR still works in the built exe, but each
+REM person downloads EasyOCR's models the first time they use the OCR
+REM checkbox (no account needed for that part, unlike the main models).
 REM ---------------------------------------------------------------------
 
 call venv\Scripts\activate
@@ -44,12 +46,29 @@ if exist "models\" (
     echo run for whoever uses it ^(run download_models.py first if you want to avoid that^).
 )
 
+set OCR_ARG=
+python -c "import easyocr" >nul 2>&1
+if %errorlevel%==0 (
+    echo Found easyocr installed -- including OCR support in the build.
+    set OCR_ARG=--collect-all easyocr --collect-all torchvision --collect-all cv2
+) else (
+    echo easyocr not installed -- OCR support will not be included ^(see requirements-ocr.txt^).
+)
+
+set OCR_MODELS_ARG=
+if exist "easyocr_models\" (
+    echo Found local easyocr_models\ folder -- bundling it so OCR needs no internet access either.
+    set OCR_MODELS_ARG=--add-data "easyocr_models;easyocr_models"
+)
+
 pyinstaller ^
     --name DocumentTranslator ^
     --onedir ^
     --windowed ^
     --add-data "fonts;fonts" ^
     %MODELS_ARG% ^
+    %OCR_ARG% ^
+    %OCR_MODELS_ARG% ^
     --collect-all torch ^
     --collect-all transformers ^
     --collect-all indicnlp ^

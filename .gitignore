@@ -25,6 +25,10 @@ translated_docs/
 # separate download alongside the exe -- not via git.
 models/
 
+# Pre-downloaded OCR model files (see download_ocr_models.py) -- same
+# reasoning as models/ above, just smaller.
+easyocr_models/
+
 # OS cruft
 .DS_Store
 Thumbs.db

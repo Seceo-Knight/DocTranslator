@@ -321,6 +321,23 @@ skewed/rotated scans aren't corrected. If `easyocr` isn't installed and OCR
 is requested anyway, you'll get a clear error telling you to
 `pip install easyocr` rather than an obscure crash.
 
+**Distributing the OCR feature to other people:** unlike the IndicTrans2
+models, EasyOCR's files aren't gated (no account needed), but they're still
+downloaded from the internet the first time someone uses the OCR checkbox.
+If you want OCR to also be zero-setup/offline for recipients of the exe, run
+this once before `build_exe.bat` (needs `requirements-ocr.txt` installed):
+
+```
+python download_ocr_models.py
+```
+
+This downloads EasyOCR's detector/recognizer files into a local
+`easyocr_models/` folder, which `build_exe.bat` bundles in automatically if
+present -- same pattern as `download_models.py` for the main translation
+models. Skip it and OCR still works fine in the built exe; each person just
+downloads those (small, tens-of-MB) files the first time they tick the OCR
+box.
+
 ---
 
 ## Packaging into a Windows .exe
@@ -425,6 +442,10 @@ If your use case is genuinely commercial/at-scale redistribution beyond your
 own team or lab, it's worth double-checking the current license terms on
 each model's Hugging Face page yourself before shipping widely -- this
 project isn't legal advice, and license terms can change.
+
+Note: this section covers the main translation models. If you also plan to
+hand out the optional OCR feature, see `download_ocr_models.py` in the OCR
+section below -- same idea, smaller files, no account required for those.
 
 ---
 
