@@ -26,6 +26,7 @@ Language tags used by IndicTrans2 (FLORES-200 style):
 
 from __future__ import annotations
 
+import os
 import sys
 import threading
 from pathlib import Path
@@ -60,16 +61,41 @@ INDIC_EN_MODEL = "ai4bharat/indictrans2-indic-en-dist-200M"
 # Batch size for a single generate() call. Larger = faster but more RAM/VRAM.
 DEFAULT_BATCH_SIZE = 8
 
+# Beam search width. Lower = faster, slightly less fluent output; higher =
+# slower, marginally better output. This matters more than usual here
+# because use_cache is forced off below (see the NOTE in translate_batch),
+# so every beam recomputes attention over the whole sequence at every step
+# instead of reusing cached keys/values -- cost scales roughly with
+# num_beams on top of that already-more-expensive baseline. 5 (IndicTrans2's
+# own recommended default) is noticeably slow on CPU for long documents; 4
+# cuts a meaningful chunk of that off with only a small quality difference
+# for a distilled 200M model. Raise it back to 5 if translation quality
+# matters more than speed for your use case, or drop it to 1 (greedy, no
+# beam search at all) for the fastest possible CPU translation.
+DEFAULT_NUM_BEAMS = 4
 
-def _project_root() -> Path:
+
+def _bundled_assets_root() -> Path:
     """
-    Same convention used elsewhere in this project (see indic_processor.py /
-    document_handler.py): when frozen by PyInstaller, resources live next to
-    the .exe; when running from source, they live next to this script.
+    Resolves the folder PyInstaller actually places --add-data content into.
+
+    IMPORTANT: this is *not* the same folder the .exe file sits in. Since
+    PyInstaller 6's --onedir layout, bundled data/binaries are placed in an
+    _internal/ subfolder next to the exe, and are reachable at runtime via
+    sys._MEIPASS -- which points at _internal/, not at the exe's own folder
+    (sys.executable's parent). Using sys.executable's parent here (as an
+    earlier version of this function did) would silently never find the
+    bundled models/ folder in the packaged exe, quietly falling back to a
+    Hugging Face download instead -- defeating the entire point of bundling.
+
+    Same convention as document_handler._assets_dir() and gui.py's
+    _assets_dir() for fonts/ and assets/, which bundle correctly for the same
+    reason. Contrast with indic_processor.py's glossary.txt lookup, which
+    deliberately uses sys.executable's parent instead -- glossary.txt isn't
+    bundled via --add-data, it's meant to be copied next to the exe by hand
+    so it stays user-editable without digging into _internal/.
     """
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parent
+    return Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 
 
 def _resolve_model_path(model_name: str) -> str:
@@ -87,7 +113,7 @@ def _resolve_model_path(model_name: str) -> str:
     downloads from the Hugging Face Hub the usual way -- this is the path
     that requires `huggingface-cli login` once, as documented in the README.
     """
-    local_dir = _project_root() / "models" / model_name.split("/")[-1]
+    local_dir = _bundled_assets_root() / "models" / model_name.split("/")[-1]
     if local_dir.is_dir():
         return str(local_dir)
     return model_name
@@ -100,10 +126,25 @@ class TranslationEngine:
     thread driven by the GUI (see gui.py).
     """
 
-    def __init__(self, device: str | None = None, batch_size: int = DEFAULT_BATCH_SIZE):
+    def __init__(
+        self,
+        device: str | None = None,
+        batch_size: int = DEFAULT_BATCH_SIZE,
+        num_beams: int = DEFAULT_NUM_BEAMS,
+    ):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.batch_size = batch_size
+        self.num_beams = num_beams
         self._lock = threading.Lock()
+
+        if self.device == "cpu":
+            # PyTorch doesn't always default to using every available core,
+            # especially inside a PyInstaller-frozen exe where the usual
+            # OMP_NUM_THREADS/MKL env vars may not be set the way they are
+            # in a normal Python install. Explicitly claiming all cores is
+            # free (no quality/behavior change) and can meaningfully speed
+            # up CPU generation on multi-core machines.
+            torch.set_num_threads(os.cpu_count() or 4)
 
         self._models: dict[str, AutoModelForSeq2SeqLM] = {}
         self._tokenizers: dict[str, AutoTokenizer] = {}
@@ -215,7 +256,7 @@ class TranslationEngine:
                     use_cache=False,
                     min_length=0,
                     max_length=256,
-                    num_beams=5,
+                    num_beams=self.num_beams,
                     num_return_sequences=1,
                 )
 

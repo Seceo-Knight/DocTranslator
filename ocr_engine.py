@@ -42,11 +42,18 @@ DEFAULT_OCR_DPI = 300
 SCANNED_TEXT_THRESHOLD = 20
 
 
-def _project_root() -> Path:
-    """Same convention as translator_engine._project_root() / indic_processor._project_root()."""
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parent
+def _bundled_assets_root() -> Path:
+    """
+    Same convention as translator_engine._bundled_assets_root(): resolves
+    the folder PyInstaller actually places --add-data content into. In a
+    frozen --onedir build that's the _internal/ folder (via sys._MEIPASS),
+    NOT the folder the .exe itself sits in -- those differ since PyInstaller
+    6's onedir layout split bundled contents into _internal/. Using
+    sys.executable's parent here would silently never find the bundled
+    easyocr_models/ folder, quietly falling back to a network download
+    instead.
+    """
+    return Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 
 
 def _bundled_ocr_models_dir() -> Path | None:
@@ -57,7 +64,7 @@ def _bundled_ocr_models_dir() -> Path | None:
     package. If present, use it (and refuse to fall back to the network) so
     the OCR feature is just as zero-setup for end users as translation is.
     """
-    local_dir = _project_root() / "easyocr_models"
+    local_dir = _bundled_assets_root() / "easyocr_models"
     return local_dir if local_dir.is_dir() else None
 
 
