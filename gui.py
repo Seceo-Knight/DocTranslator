@@ -48,7 +48,7 @@ from tkinter.scrolledtext import ScrolledText
 from document_handler import SUPPORTED_EXTENSIONS, extract_sample_texts, translate_file
 from lang_detect import detect_language_for_document
 from ocr_engine import OCREngine
-from translator_engine import LANG_TAGS, TranslationEngine
+from translator_engine import DEFAULT_NUM_BEAMS, FAST_MODE_NUM_BEAMS, LANG_TAGS, TranslationEngine
 
 LANGUAGES = list(LANG_TAGS.keys())  # ["English", "Hindi", "Marathi"]
 
@@ -101,6 +101,10 @@ class DocumentTranslatorApp:
         # opt-in rather than something that silently triggers a new install
         # the first time someone happens to feed it a scanned PDF.
         self.enable_ocr = BooleanVar(value=False)
+        # Off by default: DEFAULT_NUM_BEAMS already balances speed/quality
+        # reasonably. This lets someone explicitly trade a bit of fluency
+        # for materially faster CPU translation on long documents.
+        self.fast_mode = BooleanVar(value=False)
 
         self._build_widgets()
         self.root.after(100, self._drain_log_queue)
@@ -197,6 +201,11 @@ class DocumentTranslatorApp:
         ttk.Checkbutton(
             lang_frame, text="OCR scanned PDFs (needs easyocr; downloads OCR models on first use)",
             variable=self.enable_ocr,
+        ).pack(side=LEFT, padx=(16, 0))
+
+        ttk.Checkbutton(
+            lang_frame, text="Fast mode (quicker, slightly less fluent)",
+            variable=self.fast_mode,
         ).pack(side=LEFT, padx=(16, 0))
 
         out_frame = ttk.LabelFrame(self.root, text="3. Output folder")
@@ -355,6 +364,10 @@ class DocumentTranslatorApp:
             if self.engine is None:
                 self.engine = TranslationEngine()
                 self.engine.on_status = self._log
+            # Cheap to update every run (no model reload needed) -- lets the
+            # checkbox take effect immediately even if the engine/model was
+            # already loaded from a previous translation in this session.
+            self.engine.num_beams = FAST_MODE_NUM_BEAMS if self.fast_mode.get() else DEFAULT_NUM_BEAMS
 
             if self.enable_ocr.get() and self.ocr_engine is None:
                 self.ocr_engine = OCREngine()

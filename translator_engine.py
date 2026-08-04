@@ -74,6 +74,13 @@ DEFAULT_BATCH_SIZE = 8
 # beam search at all) for the fastest possible CPU translation.
 DEFAULT_NUM_BEAMS = 4
 
+# Greedy decoding (no beam search at all) -- the fastest possible setting,
+# used when "Fast mode" is enabled in the GUI/CLI. Noticeably quicker than
+# DEFAULT_NUM_BEAMS on CPU, at the cost of somewhat less fluent output
+# (no exploring alternative word choices, just taking the single best token
+# at each step).
+FAST_MODE_NUM_BEAMS = 1
+
 
 def _bundled_assets_root() -> Path:
     """
@@ -149,6 +156,11 @@ class TranslationEngine:
         self._models: dict[str, AutoModelForSeq2SeqLM] = {}
         self._tokenizers: dict[str, AutoTokenizer] = {}
         self._processor = IndicProcessor(inference=True)
+        # (src_tag, tgt_tag) -> {source_text: translated_text}, reused across
+        # translate_batch() calls for the lifetime of this engine so repeated
+        # segments (headers, footers, repeated table values, boilerplate
+        # across multiple files in a batch run) are only translated once.
+        self._translation_cache: dict[tuple[str, str], dict[str, str]] = {}
 
         self.on_status = None  # optional callback(str) for GUI progress messages
 
@@ -202,6 +214,13 @@ class TranslationEngine:
         Translate a list of strings from src_lang to tgt_lang (both keys of
         LANG_TAGS, e.g. "English", "Hindi", "Marathi"). Empty/whitespace-only
         entries are passed through untranslated.
+
+        Exact-duplicate strings (e.g. a repeated table header, a boilerplate
+        footer line, the same short cell value appearing many times in a
+        table) are only run through the model once per session and reused
+        for every other occurrence -- documents with a lot of repeated
+        structure translate noticeably faster this way, with no change in
+        output (it's the same model call, just not repeated).
         """
         if src_lang == tgt_lang:
             return list(texts)
@@ -224,7 +243,24 @@ class TranslationEngine:
 
         results = list(texts)  # copy; untouched entries stay as-is
 
-        subset = [texts[i] for i in indices_to_translate]
+        cache = self._translation_cache.setdefault((src_tag, tgt_tag), {})
+
+        # Only the *unique* strings actually need a model call; duplicates
+        # (and anything already seen earlier in this session) are filled in
+        # from cache after the loop below.
+        seen: dict[str, None] = {}
+        subset: List[str] = []
+        for i in indices_to_translate:
+            t = texts[i]
+            if t in cache or t in seen:
+                continue
+            seen[t] = None
+            subset.append(t)
+
+        if len(subset) < len(indices_to_translate):
+            skipped = len(indices_to_translate) - len(subset)
+            self._log(f"Skipping {skipped} duplicate/cached segment(s) already translated.")
+
         translated_subset: List[str] = []
 
         for start in range(0, len(subset), self.batch_size):
@@ -267,8 +303,15 @@ class TranslationEngine:
             )
             translated_subset.extend(self._processor.postprocess_batch(decoded, lang=tgt_tag))
 
-        for i, translated in zip(indices_to_translate, translated_subset):
-            results[i] = translated
+        # subset contains each unique new string exactly once, in order, so
+        # this zip is safe -- then cache them for reuse (this call and any
+        # future one in this session) before scattering back to every index
+        # that had that exact source text, including duplicates.
+        for original, translated in zip(subset, translated_subset):
+            cache[original] = translated
+
+        for i in indices_to_translate:
+            results[i] = cache[texts[i]]
 
         return results
 

@@ -13,6 +13,7 @@ CLI examples:
     python app.py --cli report.docx --from English --to Hindi
     python app.py --cli ./docs_folder --from Auto --to Marathi --out ./translated_docs
     python app.py --cli scanned_report.pdf --from English --to Hindi --ocr
+    python app.py --cli big_report.docx --from English --to Hindi --fast
 
 This is also the script PyInstaller packages into DocumentTranslator.exe
 (see build_exe.bat) -- by default double-clicking the exe opens the GUI.
@@ -27,7 +28,7 @@ from pathlib import Path
 from document_handler import SUPPORTED_EXTENSIONS, extract_sample_texts, translate_file
 from lang_detect import detect_language_for_document
 from ocr_engine import OCREngine
-from translator_engine import LANG_TAGS, TranslationEngine
+from translator_engine import DEFAULT_NUM_BEAMS, FAST_MODE_NUM_BEAMS, LANG_TAGS, TranslationEngine
 
 LANGUAGES = list(LANG_TAGS.keys())
 
@@ -52,7 +53,8 @@ def run_cli(args: argparse.Namespace) -> int:
     output_dir = Path(args.out)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    engine = TranslationEngine()
+    num_beams = FAST_MODE_NUM_BEAMS if args.fast else DEFAULT_NUM_BEAMS
+    engine = TranslationEngine(num_beams=num_beams)
     engine.on_status = print
 
     ocr_engine = None
@@ -95,6 +97,10 @@ def main() -> None:
     parser.add_argument(
         "--ocr", action="store_true",
         help="Enable OCR for scanned/image-only PDF pages (requires easyocr; downloads OCR models on first use)",
+    )
+    parser.add_argument(
+        "--fast", action="store_true",
+        help="Trade some translation fluency for materially faster CPU translation (greedy decoding instead of beam search)",
     )
 
     args = parser.parse_args()

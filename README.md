@@ -507,7 +507,12 @@ section below -- same idea, smaller files, no account required for those.
 - CPU translation of a long document can take a while (more so now that the
   KV-cache is disabled -- see Troubleshooting); a GPU, or the larger `-1B`
   model variants if quality matters more than speed, will be faster/better
-  respectively -- swap the model names in `translator_engine.py`.
+  respectively -- swap the model names in `translator_engine.py`. For a
+  faster CPU run at some cost to fluency, check "Fast mode" in the GUI (or
+  pass `--fast` on the CLI) to switch from beam search to greedy decoding.
+  Documents with a lot of repeated text (headers, footers, repeated table
+  values) also translate faster automatically -- exact-duplicate segments
+  are only run through the model once per session and reused.
 
 ## License
 
